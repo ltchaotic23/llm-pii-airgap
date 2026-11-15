@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-pii-airgap"
+version = "0.1.0"
+description = "Zero-dependency client-side PII tokeniser and JSONL agent transcript secret scrubber for LLM workflows."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "ltchaotic23" }
+]
+keywords = ["security", "privacy", "llm", "pii", "redaction", "secret-scanning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.scripts]
+llm-pii-airgap = "llm_pii_airgap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
