@@ -6,7 +6,7 @@ If you discover a security vulnerability, regex bypass, or false-negative leak p
 
 Instead, report it privately via one of the following channels:
 
-1. **GitHub Security Advisories**: Submit a private advisory directly under this repository's **Security -> Advisories -> New draft security advisory** tab.
+1. **GitHub Security Advisories**: Open this repository's **Security** tab and select **Report a vulnerability** to send a private report.
 2. **Direct Contact**: See [`https://mailotic.me/.well-known/security.txt`](https://mailotic.me/.well-known/security.txt) for verified PGP contact details.
 
 Please include:
