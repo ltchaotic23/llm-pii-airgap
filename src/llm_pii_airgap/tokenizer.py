@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,27 @@ class IdentityProfile:
         return mapping
 
 
+MIN_VALUE_LENGTH = 3
+_PHONE_SEPARATORS = r"[\s\-().]*"
+
+
+def _value_pattern(raw_val: str) -> str:
+    """Regex for one raw value: whole-token only, tolerant of whitespace reflow."""
+    parts = [r"\s+" if chunk.isspace() else re.escape(chunk) for chunk in re.split(r"(\s+)", raw_val) if chunk]
+    body = "".join(parts)
+    # Only anchor edges that are word characters, so "Ann" never matches inside "Annual".
+    lead = r"(?<!\w)" if raw_val[0].isalnum() or raw_val[0] == "_" else ""
+    trail = r"(?!\w)" if raw_val[-1].isalnum() or raw_val[-1] == "_" else ""
+    return f"{lead}{body}{trail}"
+
+
+def _phone_pattern(raw_val: str) -> str:
+    """Regex for a phone number that ignores spacing, dashes, dots and brackets."""
+    digits = re.sub(r"\D", "", raw_val)
+    plus = r"\+?" if raw_val.lstrip().startswith("+") else ""
+    return rf"(?<![\w+]){plus}{_PHONE_SEPARATORS.join(digits)}(?!\w)"
+
+
 class PIIAirgap:
     """Deterministic outbound PII redactor and local response re-hydrator."""
 
@@ -79,22 +101,32 @@ class PIIAirgap:
         self.profile = profile
         self._placeholders = profile.placeholder_map()
 
+        for token, raw_val in self._placeholders.items():
+            if len(raw_val) < MIN_VALUE_LENGTH:
+                # Refuse rather than skip: a silently ignored field is a silent leak.
+                raise ValueError(
+                    f"Profile value for {token} is shorter than {MIN_VALUE_LENGTH} characters "
+                    "and cannot be matched without corrupting unrelated text."
+                )
+
         # Sort raw values longest-first so full addresses/emails match before substrings.
         sorted_items = sorted(
             self._placeholders.items(),
             key=lambda item: len(item[1]),
             reverse=True,
         )
-        self._ordered_items: list[tuple[str, str]] = sorted_items
-        self._raw_lookup: dict[str, str] = {}
-        for token, raw_val in sorted_items:
-            self._raw_lookup.setdefault(raw_val.casefold(), token)
+        self._group_tokens: dict[str, str] = {}
+        alternatives: list[str] = []
+        for index, (token, raw_val) in enumerate(sorted_items):
+            group = f"g{index}"
+            self._group_tokens[group] = token
+            is_phone = token == "[PHONE]" and sum(ch.isdigit() for ch in raw_val) >= 7
+            pattern = _phone_pattern(raw_val) if is_phone else _value_pattern(raw_val)
+            alternatives.append(f"(?P<{group}>{pattern})")
 
-        if sorted_items:
-            raw_alt = "|".join(re.escape(raw_val) for _, raw_val in sorted_items)
-            self._raw_rx: re.Pattern[str] | None = re.compile(raw_alt, re.IGNORECASE)
-        else:
-            self._raw_rx = None
+        self._raw_rx: re.Pattern[str] | None = (
+            re.compile("|".join(alternatives), re.IGNORECASE) if alternatives else None
+        )
 
         if self._placeholders:
             tok_alt = "|".join(re.escape(tok) for tok in self._placeholders)
@@ -107,9 +139,15 @@ class PIIAirgap:
         if not text or self._raw_rx is None:
             return text
         return self._raw_rx.sub(
-            lambda match: self._raw_lookup[match.group(0).casefold()],
+            lambda match: self._group_tokens[str(match.lastgroup)],
             text,
         )
+
+    def placeholders_in(self, text: str) -> set[str]:
+        """Return the known placeholders present in text (use as a rehydrate allow-list)."""
+        if not text or self._token_rx is None:
+            return set()
+        return set(self._token_rx.findall(text))
 
     def sanitize_payload(self, payload: Any) -> Any:
         """Recursively sanitize strings inside nested lists and dicts."""
@@ -121,28 +159,34 @@ class PIIAirgap:
             return {k: self.sanitize_payload(v) for k, v in payload.items()}
         return payload
 
-    def rehydrate(self, payload: Any) -> Any:
-        """Recursively replace placeholders in LLM output with local profile values."""
+    def rehydrate(self, payload: Any, *, allow: Collection[str] | None = None) -> Any:
+        """Recursively replace placeholders in LLM output with local profile values.
+
+        A model response is untrusted: it can contain placeholders the prompt never
+        had (for example via prompt injection asking for "[ADDRESS]"). Pass ``allow``
+        (typically ``placeholders_in(sanitized_prompt)``) to restore only those
+        placeholders and leave any others as inert text.
+        """
         if isinstance(payload, str):
             if not payload or self._token_rx is None:
                 return payload
             return self._token_rx.sub(
-                lambda match: self._placeholders[match.group(0)],
+                lambda match: (
+                    self._placeholders[match.group(0)]
+                    if allow is None or match.group(0) in allow
+                    else match.group(0)
+                ),
                 payload,
             )
         if isinstance(payload, list):
-            return [self.rehydrate(item) for item in payload]
+            return [self.rehydrate(item, allow=allow) for item in payload]
         if isinstance(payload, dict):
-            return {k: self.rehydrate(v) for k, v in payload.items()}
+            return {k: self.rehydrate(v, allow=allow) for k, v in payload.items()}
         return payload
 
     def contains_raw_pii(self, text: str) -> list[str]:
         """Return placeholder names whose raw values appear in text."""
-        if not text:
+        if not text or self._raw_rx is None:
             return []
-        folded = text.casefold()
-        hits: list[str] = []
-        for token, raw_val in self._placeholders.items():
-            if raw_val.casefold() in folded:
-                hits.append(token)
-        return hits
+        found = {self._group_tokens[str(match.lastgroup)] for match in self._raw_rx.finditer(text)}
+        return [token for token in self._placeholders if token in found]

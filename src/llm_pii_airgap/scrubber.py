@@ -134,10 +134,11 @@ def scrub_jsonl_stream(
 
         uid = record.get("uuid") if isinstance(record, dict) else None
         if uid is not None:
-            if uid in seen_uuids:
+            uid_key = str(uid)
+            if uid_key in seen_uuids:
                 stats["duplicates_skipped"] += 1
                 continue
-            seen_uuids.add(str(uid))
+            seen_uuids.add(uid_key)
 
         text = extract_user_text(record, drop_tool_results=drop_tool_results)
         if text is None:
