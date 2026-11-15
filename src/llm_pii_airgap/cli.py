@@ -63,11 +63,15 @@ def _cmd_rehydrate(args: argparse.Namespace) -> int:
     profile = IdentityProfile.from_json_file(args.profile)
     airgap = PIIAirgap(profile)
     raw = _read_text_arg(args.text, args.input)
+    allow: set[str] | None = None
+    if args.allow_from:
+        # Restore only placeholders that were present in the prompt actually sent.
+        allow = airgap.placeholders_in(Path(args.allow_from).read_text(encoding="utf-8"))
     if args.json:
         payload = json.loads(raw)
-        result = json.dumps(airgap.rehydrate(payload), indent=2, ensure_ascii=False)
+        result = json.dumps(airgap.rehydrate(payload, allow=allow), indent=2, ensure_ascii=False)
     else:
-        result = str(airgap.rehydrate(raw))
+        result = str(airgap.rehydrate(raw, allow=allow))
     _write_text_output(result, args.output)
     return 0
 
@@ -118,6 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
         group.add_argument("-i", "--input", help="Input file path (or '-' for stdin).")
         p_tok.add_argument("-o", "--output", help="Optional output file path.")
         p_tok.add_argument("--json", action="store_true", help="Parse input as JSON and transform recursively.")
+        if name == "rehydrate":
+            p_tok.add_argument(
+                "--allow-from",
+                metavar="SANITIZED_PROMPT",
+                help="Only restore placeholders that appear in this sanitized prompt file.",
+            )
         p_tok.set_defaults(func=handler)
 
     p_check = sub.add_parser("check", help="Exit 1 if secret patterns or raw profile PII are found.")

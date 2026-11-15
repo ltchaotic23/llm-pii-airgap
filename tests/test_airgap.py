@@ -84,6 +84,44 @@ class TestPIIAirgap(unittest.TestCase):
         self.assertEqual(result["lines"][2], 42)
 
 
+class TestTokeniserBoundaries(unittest.TestCase):
+    def test_value_is_not_replaced_inside_other_words(self) -> None:
+        airgap = PIIAirgap(IdentityProfile(custom_fields={"nick": "Ann"}))
+        sanitized = airgap.sanitize_prompt("Annual planning with Ann, then Joanna and ann.")
+        self.assertEqual(sanitized, "Annual planning with [CUSTOM_NICK], then Joanna and [CUSTOM_NICK].")
+
+    def test_whitespace_reflow_still_matches(self) -> None:
+        airgap = PIIAirgap(_sample_profile())
+        sanitized = airgap.sanitize_prompt("Signed,\nAlex\n  Example\n100 Maple\tAvenue, Springfield")
+        self.assertNotIn("Alex", sanitized)
+        self.assertNotIn("Avenue", sanitized)
+        self.assertEqual(airgap.contains_raw_pii(sanitized), [])
+
+    def test_phone_number_formatting_variants(self) -> None:
+        airgap = PIIAirgap(_sample_profile())
+        for variant in ("+12025550143", "+1-202-555-0143", "+1 (202) 555 0143", "1 202.555.0143"):
+            with self.subTest(variant=variant):
+                self.assertEqual(airgap.sanitize_prompt(f"Call {variant} now"), "Call [PHONE] now")
+                self.assertEqual(airgap.contains_raw_pii(f"Call {variant} now"), ["[PHONE]"])
+        # A longer number that merely contains the digits is a different number.
+        self.assertEqual(airgap.sanitize_prompt("ref 912025550143"), "ref 912025550143")
+
+    def test_too_short_value_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            PIIAirgap(IdentityProfile(custom_fields={"initials": "AE"}))
+
+    def test_rehydrate_allow_list_blocks_injected_placeholders(self) -> None:
+        airgap = PIIAirgap(_sample_profile())
+        sent = airgap.sanitize_prompt("Write a greeting for Alex Example.")
+        allow = airgap.placeholders_in(sent)
+        self.assertEqual(allow, {"[FULL_NAME]"})
+        # The model reply asks for a field the prompt never contained.
+        reply = {"text": "Hi [FULL_NAME]!", "note": ["Ship to [ADDRESS]", "[EMAIL]"]}
+        restored = airgap.rehydrate(reply, allow=allow)
+        self.assertEqual(restored["text"], "Hi Alex Example!")
+        self.assertEqual(restored["note"], ["Ship to [ADDRESS]", "[EMAIL]"])
+
+
 class TestSecretScrubber(unittest.TestCase):
     def test_all_eleven_redaction_rules(self) -> None:
         # Construct synthetic fixtures dynamically so secret scanners never flag test code.
@@ -234,6 +272,24 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(
                 rehydrated_file.read_text(encoding="utf-8"),
                 "Email Alex Example at alex.example@example.invalid",
+            )
+
+            # --allow-from restores only placeholders present in the prompt that was sent
+            reply_file = tmp_dir / "reply.txt"
+            guarded_file = tmp_dir / "guarded.txt"
+            reply_file.write_text("Dear [FULL_NAME], your address is [ADDRESS]", encoding="utf-8")
+            sent_file = tmp_dir / "sent.txt"
+            sent_file.write_text("Greet [FULL_NAME]", encoding="utf-8")
+            self.assertEqual(
+                cli_main(
+                    ["rehydrate", "-p", str(profile_path), "-i", str(reply_file),
+                     "--allow-from", str(sent_file), "-o", str(guarded_file)]
+                ),
+                0,
+            )
+            self.assertEqual(
+                guarded_file.read_text(encoding="utf-8"),
+                "Dear Alex Example, your address is [ADDRESS]",
             )
 
             in_jsonl = tmp_dir / "in.jsonl"
