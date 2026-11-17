@@ -29,7 +29,10 @@ flowchart LR
 
 * **Single-Pass Longest-First Tokenisation (`tokenizer.py`)**: If a `street_address` contains the user's `postal_code`, naive sequential `str.replace()` calls substitute the postal_code first and leave the rest of the street unredacted. `PIIAirgap` sorts populated values longest-first into one alternation regex so full spans win and inserted `[PLACEHOLDER]` tokens can never be re-matched.
 * **Specificity-Ordered Secret Rules (`scrubber.py`)**: Multi-line PEM `<PRIVATE_KEY>` blocks, structured tokens (`<DISCORD_TOKEN>`, `<API_KEY>`), credentialed URLs (`<URL_WITH_CREDS>`), and proxy URIs (`<PROXY_URI>`) execute before generic `<UUID>`, `<IP>`, `<SECRET>`, and `<LONG_TOKEN>` rules. The `<SECRET>` rule uses a negative lookahead so it does not overwrite already-classified `<API_KEY>` tags.
-* **No Raw Echoing in Logs (`cli.py`)**: Both `scrub` and `check` emit counts and category names only—never raw matched secrets or prompt text.
+* **Key-Aware `<SECRET>` Rule (`scrubber.py`)**: A secret-like name (`password`, `token`, `secret`, `api_key`, `authorization`, …) is recognised inside longer names (`DB_PASSWORD`, `accessToken`), quoted JSON keys, `--password value` flags and `Bearer` tokens. The name is kept and only the value is replaced (`DB_PASSWORD=<SECRET>`), including a whole quoted value with spaces. Plurals and longer words (`max_tokens`, `tokenizer`) and values that are already placeholders are left alone.
+* **No Raw Echoing in Logs (`cli.py`)**: Both `scrub` and `check` emit counts and category names only—never raw matched secrets or prompt text. Errors exit with code 2 and name fields and files only.
+* **Refuse Rather Than Skip (`tokenizer.py`, `cli.py`)**: A profile with an unknown or misspelt key, a duplicate key, a non-string value, two custom fields that share a placeholder, or no values at all is rejected instead of loading as a weaker profile. `sanitize` re-checks its own output and writes nothing if a profile value is still present.
+* **JSON-Aware (`tokenizer.py`, `cli.py`)**: `sanitize --json` replaces values in keys, strings and numbers (a phone stored as a number becomes the string `[PHONE]`) and accepts JSON Lines. `check` also scans the text with JSON escapes decoded, so `Jos\u00e9` or an address split by `\n` is still found.
 * **Whole-Token Matching (`tokenizer.py`)**: Values match case-insensitively, across reflowed whitespace, and only as whole tokens, so a profile value `Ann` is not replaced inside `Annual`. Phone numbers match regardless of spaces, dashes, dots and brackets. Values shorter than 3 characters raise `ValueError` instead of being silently skipped.
 * **Untrusted Model Output (`rehydrate`)**: A response can contain placeholders the prompt never had, for example after a prompt injection asking the model to print `[ADDRESS]`. Pass `allow=airgap.placeholders_in(sanitized_prompt)` (CLI: `--allow-from`) so only placeholders that were actually sent are restored.
 
@@ -39,7 +42,10 @@ This is exact-value matching against a profile you supply, not PII detection.
 
 * It does not find PII that is absent from the profile, and it misses misspellings, nicknames, initials, transliterations and partial values (a first name alone when only `full_name` is set).
 * Phone matching follows the digits as written: a profile value of `+1 202 555 0143` does not match the national form `202 555 0143`. Add the other form as a custom field.
-* The secret scrubber is a fixed list of regular expressions. It will miss secrets in formats it does not know and will over-redact some long identifiers. Review output before publishing a dataset.
+* A value split across separate JSON fields (first and last name under different keys) is not matched. Add each part as a custom field.
+* Plain-text `sanitize` cannot replace a value hidden behind JSON escapes; it stops with an error and asks for `--json`. JSON nested inside a JSON string is detected but not unpacked. A number replaced by `sanitize --json` comes back from `rehydrate` as a string.
+* Piped input is read as UTF-8. Windows PowerShell 5.1 replaces accented letters with `?` before the tool receives them, so those values cannot match; pass a file with `-i` instead.
+* The secret scrubber is a fixed list of regular expressions. It will miss secrets in formats it does not know and will over-redact some long identifiers. `<SECRET>` needs a recognisable name next to the value, so a secret in free prose ("the password is …") or after a short flag (`-p…`) is not found. Under a secret-named key, only the first item of a list is replaced, and a nested block is only caught when its own keys look secret (`token:` followed by `value: abc` is missed). Review output before publishing a dataset.
 * Rehydrated text contains real PII. Never send it back to a model or to any untrusted destination.
 
 ## Installation & Quick Start
@@ -82,7 +88,7 @@ local_final = airgap.rehydrate(reply, allow=airgap.placeholders_in(outbound))
 # Scrub secrets and harness tags from an agent .jsonl transcript (prints JSON counts only)
 python -m llm_pii_airgap.cli scrub -i raw_session.jsonl -o clean_session.jsonl
 
-# Check a file for leaks before committing or uploading (exits 1 if leaks found)
+# Check a file for leaks before committing or uploading (exits 1 if leaks found, 2 on errors)
 python -m llm_pii_airgap.cli check -p profile.local.json -i outbound_prompt.txt
 
 # Sanitize / rehydrate from CLI

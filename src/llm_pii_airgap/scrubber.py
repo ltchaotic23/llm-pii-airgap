@@ -28,6 +28,46 @@ _STRIP_BLOCKS = re.compile(
 )
 _STRIP_INLINE = re.compile(r"\[Image #?\d*[^\]]*\]|\[Pasted text[^\]]*\]")
 
+# --- <SECRET>: a secret-looking name followed by its value -------------------------------
+# The keyword may sit inside a longer name (DB_PASSWORD, accessToken, client_secret, a quoted
+# JSON key), so there is deliberately no word boundary in front of it.
+_SECRET_WORD = (
+    r"(?:(?i:password|passwd|passphrase|pwd|secret|token|credentials?|authorization"
+    r"|(?:api|access|private|auth|signing|encryption)[_-]?key)"
+    r"|(?<![A-Za-z])(?i:pass)(?![A-Za-z])"  # DB_PASS, but not PASSED or bypass
+    r"|_KEY)"  # env style: STRIPE_KEY, SSH_KEY
+)
+# ...but not inside a longer ordinary word or a plural: tokens, tokenizer, secretary, MAX_TOKENS.
+_NOT_LONGER_WORD = r"(?![a-z]|S(?![A-Za-z0-9]))"
+_SECRET_NAME = _SECRET_WORD + _NOT_LONGER_WORD + r"[A-Za-z0-9_-]{0,40}"
+# Leave values that are already a placeholder (<API_KEY>, <YOUR_TOKEN>) or plainly not a secret.
+_NOT_A_SECRET = r"(?!\\?[\"']?<[A-Z][A-Z0-9_]*>)(?!(?i:true|false|null|none)(?![A-Za-z0-9_]))"
+_SECRET_VALUE = (
+    r"(?:\"(?:[^\"\\\n]|\\.)*\""  # "double quoted, may contain spaces"
+    r"|'(?:[^'\\\n]|\\.)*'"  # 'single quoted'
+    r"|\\\"[^\"\n]*\\\""  # \"quoted inside an escaped JSON string\"
+    # bare word, with an optional auth scheme in front; never an opening { or [, whose
+    # contents are matched on their own ("token": {"access_token": ...})
+    r"|(?![{\[])(?:(?i:bearer|basic)[ \t]+)?\S+)"
+)
+# A value must never swallow the next key. It may sit on a later line than its name, but
+# not when that line is itself "name:" or "name=": that is a nested block, and taking its
+# key as the value would leave the real secret behind it untouched.
+_KEY_LIKE = r"[\"']?[A-Za-z_][\w.-]{0,80}[\"']?[ \t]*(?:=(?![=\s]|$)|:(?=\s|$))"
+# "- " is a YAML list marker: step over it, and never treat the marker itself as the value.
+_VALUE_GAP = rf"[ \t]*(?:\r?\n\s*(?:-[ \t]+|(?!-[ \t]))(?!{_KEY_LIKE}))?"
+# Each alternative captures the text to keep (name and separator); only the value is replaced.
+_SECRET_RULE = (
+    # name = value, name: value, "name": "value", NAME=value, obj["name"] = value
+    # (the guard after the separator stops "== <SECRET>" being matched again on a second pass)
+    rf"({_SECRET_NAME}\\?[\"']?\]?\s*(?:=>|:=|={{1,3}}|:){_VALUE_GAP})"
+    rf"(?![=>]+\s*<[A-Z][A-Z0-9_]*>){_NOT_A_SECRET}{_SECRET_VALUE}"
+    # Bearer <token> outside a header
+    rf"|((?i:\bbearer)[ \t]+){_NOT_A_SECRET}(?=[\w.~+/-]{{0,200}}\d)[\w.~+/-]{{16,}}=*"
+    # --password value, --api-key value
+    rf"|(--[A-Za-z0-9-]{{0,40}}?{_SECRET_WORD}{_NOT_LONGER_WORD}[A-Za-z0-9-]{{0,40}}[ \t]+){_NOT_A_SECRET}(?!-)\S+"
+)
+
 _RAW_REDACT_RULES: tuple[tuple[str, str], ...] = (
     # Specificity order matters: structured keys and URIs must run before generic patterns.
     ("<PRIVATE_KEY>", r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
@@ -39,7 +79,7 @@ _RAW_REDACT_RULES: tuple[tuple[str, str], ...] = (
     ("<EMAIL>", r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
     ("<IP>", r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
     ("<PHONE>", r"(?<!\w)\+\d[\d \-]{8,}\d\b"),
-    ("<SECRET>", r"(?i)\b(?:password|passwd|pwd|token|secret|api[_-]?key)\b\s*[:=]\s*(?!<(?:PRIVATE_KEY|DISCORD_TOKEN|API_KEY|URL_WITH_CREDS|PROXY_URI|UUID|EMAIL|IP|PHONE|SECRET|LONG_TOKEN)>)\S+"),
+    ("<SECRET>", _SECRET_RULE),
     ("<LONG_TOKEN>", r"\b(?=[A-Za-z0-9_\-+/]*\d)(?=[A-Za-z0-9_\-+/]*[A-Za-z])[A-Za-z0-9_\-+/]{40,}={0,2}"),
 )
 
@@ -59,14 +99,22 @@ def strip_harness_tags(text: str) -> str:
 
 
 def redact_secrets(text: str) -> tuple[str, dict[str, int]]:
-    """Scrub secret and PII patterns in specificity order; return text and counts."""
+    """Scrub secret and PII patterns in specificity order; return text and counts.
+
+    A rule may capture a leading part of its match (a key name and separator); that
+    part is kept and only the rest is replaced, so ``DB_PASSWORD=x`` becomes
+    ``DB_PASSWORD=<SECRET>``.
+    """
     counts: dict[str, int] = {}
     if not text:
         return text, counts
 
     scrubbed = text
     for placeholder, pattern in REDACT_RULES:
-        scrubbed, hits = pattern.subn(placeholder, scrubbed)
+        scrubbed, hits = pattern.subn(
+            lambda match, tag=placeholder: "".join(part for part in match.groups() if part) + tag,
+            scrubbed,
+        )
         if hits:
             counts[placeholder] = hits
     return scrubbed, counts
