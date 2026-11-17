@@ -94,8 +94,11 @@ def _profile_fields_in(airgap: PIIAirgap, raw: str) -> list[str]:
     return [token for token in airgap.profile.placeholder_map() if token in found]
 
 
-def _secret_counts_in(raw: str) -> dict[str, int]:
-    """Secret pattern counts for the text: per pattern, the most found in any view of it."""
+def _redaction_counts_in(raw: str) -> dict[str, int]:
+    """How many times each redaction pattern fires: per pattern, the most found in any view of the text.
+
+    Only pattern names and counts leave this function, never the matched text.
+    """
     counts: dict[str, int] = {}
     for view in _text_views(raw):
         for placeholder, hits in redact_secrets(view)[1].items():
@@ -172,16 +175,16 @@ def _cmd_rehydrate(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     raw = _read_text_arg(args.text, args.input)
-    secret_counts = _secret_counts_in(raw)
+    pattern_counts = _redaction_counts_in(raw)
     pii_hits: list[str] = []
     if args.profile:
         airgap = PIIAirgap(IdentityProfile.from_json_file(args.profile))
         pii_hits = _profile_fields_in(airgap, raw)
 
-    clean = (not secret_counts) and (not pii_hits)
+    clean = (not pattern_counts) and (not pii_hits)
     report = {
         "clean": clean,
-        "secret_pattern_counts": secret_counts,
+        "secret_pattern_counts": pattern_counts,
         "raw_profile_fields_detected": pii_hits,
     }
     sys.stdout.write(json.dumps(report, indent=2) + "\n")
