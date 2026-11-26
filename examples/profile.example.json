@@ -1,0 +1,11 @@
+{
+  "full_name": "Alex Example",
+  "email": "alex.example@example.invalid",
+  "phone": "+1 202 555 0143",
+  "street_address": "100 Maple Avenue, Springfield",
+  "postal_code": "12345",
+  "custom_fields": {
+    "employee_id": "EMP-9042",
+    "badge_number": null
+  }
+}

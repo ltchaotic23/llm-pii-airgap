@@ -5,10 +5,33 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
+import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+def _char_ranges(codepoints: list[int]) -> str:
+    """Build a compact regex character-class body for sorted code points."""
+    cps = sorted(set(codepoints))
+    parts: list[str] = []
+    i = 0
+    while i < len(cps):
+        start = end = cps[i]
+        while i + 1 < len(cps) and cps[i + 1] == end + 1:
+            i += 1
+            end = cps[i]
+        parts.append(re.escape(chr(start)) if start == end else f"{re.escape(chr(start))}-{re.escape(chr(end))}")
+        i += 1
+    return "".join(parts)
+
+
+_COMBINING_RANGES = _char_ranges(
+    [cp for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith("M")]
+)
+_WORD_CHAR = rf"[\w{_COMBINING_RANGES}]"
 
 
 _BASE_FIELDS = ("full_name", "email", "phone", "street_address", "postal_code")
@@ -59,7 +82,7 @@ class IdentityProfile:
         Unknown keys, duplicate keys and non-string values raise ``ValueError``: a
         misspelt field name must never load as an empty profile.
         """
-        raw = Path(path).read_text(encoding="utf-8")
+        raw = Path(path).read_text(encoding="utf-8-sig")  # -sig: accept a byte order mark
         data = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
         if not isinstance(data, dict):
             raise ValueError("Identity profile JSON must contain an object at the root.")
@@ -97,6 +120,8 @@ class IdentityProfile:
         for token, value in base_fields:
             cleaned = value.strip()
             if cleaned:
+                if token == "[PHONE]" and not any(ch.isdecimal() for ch in cleaned):
+                    raise ValueError("Profile field 'phone' must contain at least one digit.")
                 mapping[token] = cleaned
 
         sources: dict[str, str] = {}
@@ -119,21 +144,31 @@ MIN_VALUE_LENGTH = 3
 _PHONE_SEPARATORS = r"[\s\-().]*"
 
 
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_" or unicodedata.category(ch).startswith("M")
+
+
 def _value_pattern(raw_val: str) -> str:
     """Regex for one raw value: whole-token only, tolerant of whitespace reflow."""
     parts = [r"\s+" if chunk.isspace() else re.escape(chunk) for chunk in re.split(r"(\s+)", raw_val) if chunk]
     body = "".join(parts)
-    # Only anchor edges that are word characters, so "Ann" never matches inside "Annual".
-    lead = r"(?<!\w)" if raw_val[0].isalnum() or raw_val[0] == "_" else ""
-    trail = r"(?!\w)" if raw_val[-1].isalnum() or raw_val[-1] == "_" else ""
+    # Only anchor edges that are word characters or combining marks, so "Ann" never matches inside "Annual"
+    # and "Jose" never matches inside decomposed "Jose\u0301".
+    lead = rf"(?<!{_WORD_CHAR})" if _is_word_char(raw_val[0]) else ""
+    trail = rf"(?!{_WORD_CHAR})" if _is_word_char(raw_val[-1]) else ""
     return f"{lead}{body}{trail}"
 
 
 def _phone_pattern(raw_val: str) -> str:
     """Regex for a phone number that ignores spacing, dashes, dots and brackets."""
     digits = re.sub(r"\D", "", raw_val)
-    plus = r"\+?" if raw_val.lstrip().startswith("+") else ""
-    return rf"(?<![\w+]){plus}{_PHONE_SEPARATORS.join(digits)}(?!\w)"
+    if not digits:
+        raise ValueError("Profile field 'phone' must contain at least one digit.")
+    if raw_val.lstrip().startswith("+"):
+        lead = rf"(?:(?<!{_WORD_CHAR})\+|(?<!{_WORD_CHAR})(?<!{_WORD_CHAR}\+))"
+    else:
+        lead = rf"(?<!{_WORD_CHAR})(?<!{_WORD_CHAR}\+)"
+    return rf"{lead}{_PHONE_SEPARATORS.join(digits)}(?!{_WORD_CHAR})"
 
 
 class PIIAirgap:
@@ -166,8 +201,16 @@ class PIIAirgap:
         for index, (token, raw_val) in enumerate(sorted_items):
             group = f"g{index}"
             self._group_tokens[group] = token
-            is_phone = token == "[PHONE]" and sum(ch.isdigit() for ch in raw_val) >= 7
-            pattern = _phone_pattern(raw_val) if is_phone else _value_pattern(raw_val)
+            is_phone = token == "[PHONE]" and sum(ch.isdecimal() for ch in raw_val) >= 7
+            # A value pasted into the profile with a decomposed accent or full-width digits
+            # must still match the ordinary form, so each value also matches as NFC and NFKC.
+            forms = dict.fromkeys(
+                (raw_val, unicodedata.normalize("NFC", raw_val), unicodedata.normalize("NFKC", raw_val))
+            )
+            pattern = "|".join(
+                _phone_pattern(form) if is_phone and sum(ch.isdecimal() for ch in form) >= 7 else _value_pattern(form)
+                for form in forms
+            )
             alternatives.append(f"(?P<{group}>{pattern})")
 
         self._raw_rx: re.Pattern[str] = re.compile("|".join(alternatives), re.IGNORECASE)
@@ -217,35 +260,50 @@ class PIIAirgap:
             return result
         raise TypeError(f"Cannot sanitize a value of type {type(payload).__name__}.")
 
-    def rehydrate(self, payload: Any, *, allow: Collection[str] | None = None) -> Any:
+    def rehydrate(self, payload: Any, *, allow: Collection[str]) -> Any:
         """Recursively replace placeholders in LLM output with local profile values.
 
         A model response is untrusted: it can contain placeholders the prompt never
-        had (for example via prompt injection asking for "[ADDRESS]"). Pass ``allow``
-        (typically ``placeholders_in(sanitized_prompt)``) to restore only those
-        placeholders and leave any others as inert text.
+        had (for example via prompt injection asking for "[ADDRESS]"). ``allow`` is
+        therefore required: only the placeholders in it are restored, and any others
+        stay as inert text. Pass ``placeholders_in(sanitized_prompt)`` to restore what
+        was actually sent, or ``profile.placeholder_map().keys()`` to restore everything.
         """
+        if (
+            allow is None
+            or isinstance(allow, (str, bytes, bytearray))
+            or not isinstance(allow, Collection)
+            or not all(isinstance(item, str) for item in allow)
+        ):
+            raise TypeError(
+                "allow must be a collection of placeholders, such as placeholders_in(sanitized_prompt); "
+                "pass profile.placeholder_map().keys() to restore every placeholder."
+            )
+        return self._rehydrate(payload, frozenset(allow))
+
+    def _rehydrate(self, payload: Any, allow: frozenset[str]) -> Any:
         if isinstance(payload, str):
             if not payload:
                 return payload
             return self._token_rx.sub(
-                lambda match: (
-                    self._placeholders[match.group(0)]
-                    if allow is None or match.group(0) in allow
-                    else match.group(0)
-                ),
+                lambda match: self._placeholders[match.group(0)] if match.group(0) in allow else match.group(0),
                 payload,
             )
+        if payload is None or isinstance(payload, (bool, int, float)):
+            return payload
         if isinstance(payload, list):
-            return [self.rehydrate(item, allow=allow) for item in payload]
+            return [self._rehydrate(item, allow) for item in payload]
         if isinstance(payload, tuple):
-            return tuple(self.rehydrate(item, allow=allow) for item in payload)
+            return tuple(self._rehydrate(item, allow) for item in payload)
         if isinstance(payload, dict):
-            return {
-                (self.rehydrate(k, allow=allow) if isinstance(k, str) else k): self.rehydrate(v, allow=allow)
-                for k, v in payload.items()
-            }
-        return payload
+            result: dict[Any, Any] = {}
+            for key, value in payload.items():
+                new_key = self._rehydrate(key, allow)
+                if new_key in result:
+                    raise ValueError("Two payload keys are identical after rehydrating; rename one of them.")
+                result[new_key] = self._rehydrate(value, allow)
+            return result
+        raise TypeError(f"Cannot rehydrate a value of type {type(payload).__name__}.")
 
     def contains_raw_pii(self, text: str) -> list[str]:
         """Return placeholder names whose raw values appear in text."""
