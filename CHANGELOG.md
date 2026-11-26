@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (26 November 2026)
 
 ### Breaking changes
 - `PIIAirgap.rehydrate()` needs an allow-list and validates types and keys. `allow` is now a
