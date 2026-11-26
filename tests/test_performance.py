@@ -134,7 +134,7 @@ class TestEveryRegexIsLinear(TimedTestCase):
         many_distinct = "".join(f"<pasted_content_{i}>" for i in range(40_000))
         self.assert_linear("40k distinct pasted tags", strip_harness_tags, many_distinct)
 
-    def test_tokeniser_patterns_on_crafted_input(self) -> None:
+    def test_tokenizer_patterns_on_crafted_input(self) -> None:
         airgap = PIIAirgap(IdentityProfile(
             full_name="Alex Example", phone="+1 202 555 0143", street_address="100 Maple Avenue, Springfield",
         ))

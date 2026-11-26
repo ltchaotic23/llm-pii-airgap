@@ -80,7 +80,7 @@ class TestScrubberNoise(unittest.TestCase):
         self.assertEqual((rows[0]["text"], summary["redactions"]), ("what is in this picture?", {}))
 
 
-class TestTokeniserNoise(unittest.TestCase):
+class TestTokenizerNoise(unittest.TestCase):
     def test_ordinary_words_that_contain_a_profile_value(self) -> None:
         airgap = PIIAirgap(sample_profile())
         for text in (

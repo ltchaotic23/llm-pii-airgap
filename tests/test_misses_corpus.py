@@ -16,7 +16,7 @@ from support import IdentityProfile, PIIAirgap, j, redact_secrets, run_cli, samp
 from llm_pii_airgap.cli import _profile_fields_in
 
 
-class TestTokeniserLimits(unittest.TestCase):
+class TestTokenizerLimits(unittest.TestCase):
     def setUp(self) -> None:
         self.airgap = PIIAirgap(sample_profile())
 

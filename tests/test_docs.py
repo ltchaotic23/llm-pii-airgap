@@ -123,7 +123,7 @@ class TestReadmeTables(unittest.TestCase):
 
     def test_every_misses_corpus_test_is_in_the_tested_table(self) -> None:
         listed = section("Limits")
-        for class_name in ("TestTokeniserLimits", "TestScrubberLimits"):
+        for class_name in ("TestTokenizerLimits", "TestScrubberLimits"):
             cls = getattr(test_misses_corpus, class_name)
             for attr in dir(cls):
                 if attr.startswith("test_"):

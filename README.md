@@ -572,18 +572,18 @@ behaviour, so a limit can't change without this list changing too.
 
 | Limit or claim | Test |
 |---|---|
-| Only exact profile values | `test_misses_corpus.TestTokeniserLimits.test_only_exact_profile_values_are_found` |
-| Phone digits as written | `test_misses_corpus.TestTokeniserLimits.test_phone_numbers_follow_the_digits_as_written` |
-| Split or reformatted values | `test_misses_corpus.TestTokeniserLimits.test_split_or_reformatted_values_are_missed` |
-| Encoded values | `test_misses_corpus.TestTokeniserLimits.test_encoded_values_are_missed` |
+| Only exact profile values | `test_misses_corpus.TestTokenizerLimits.test_only_exact_profile_values_are_found` |
+| Phone digits as written | `test_misses_corpus.TestTokenizerLimits.test_phone_numbers_follow_the_digits_as_written` |
+| Split or reformatted values | `test_misses_corpus.TestTokenizerLimits.test_split_or_reformatted_values_are_missed` |
+| Encoded values | `test_misses_corpus.TestTokenizerLimits.test_encoded_values_are_missed` |
 | Unicode variants found by `check` | `test_bypasses.TestVariantsTheRecheckCatches.test_check_finds_each_variant` |
 | Unicode variants that make `sanitize` refuse | `test_bypasses.TestVariantsTheRecheckCatches.test_sanitize_refuses_rather_than_writing_a_variant` |
-| Unicode variants missed everywhere | `test_misses_corpus.TestTokeniserLimits.test_unicode_variants_that_no_normalisation_maps` |
-| Overlapping values | `test_misses_corpus.TestTokeniserLimits.test_overlapping_values_that_start_at_different_points` |
-| JSON escapes, nested JSON and numbers | `test_misses_corpus.TestTokeniserLimits.test_json_escapes_nested_json_and_numbers` |
+| Unicode variants missed everywhere | `test_misses_corpus.TestTokenizerLimits.test_unicode_variants_that_no_normalisation_maps` |
+| Overlapping values | `test_misses_corpus.TestTokenizerLimits.test_overlapping_values_that_start_at_different_points` |
+| JSON escapes, nested JSON and numbers | `test_misses_corpus.TestTokenizerLimits.test_json_escapes_nested_json_and_numbers` |
 | Number containing a value | `test_json.TestJsonShapes.test_array_root_and_scalars` |
-| Profile spelling on rehydrate | `test_misses_corpus.TestTokeniserLimits.test_rehydrate_restores_the_profile_spelling` |
-| A placeholder you typed yourself | `test_misses_corpus.TestTokeniserLimits.test_literal_placeholder_in_the_prompt_is_restored` |
+| Profile spelling on rehydrate | `test_misses_corpus.TestTokenizerLimits.test_rehydrate_restores_the_profile_spelling` |
+| A placeholder you typed yourself | `test_misses_corpus.TestTokenizerLimits.test_literal_placeholder_in_the_prompt_is_restored` |
 | Workaround for typed placeholders | `test_bypasses.TestPlaceholderCollision.test_subtracting_the_original_keeps_only_real_substitutions` |
 | Windows PowerShell 5.1 pipes | Not tested automatically: it happens inside Windows PowerShell 5.1 before the tool runs. `test_encoding.TestPipedInputEncoding` covers UTF-8 arriving through a legacy code page. |
 | Unknown secret formats | `test_misses_corpus.TestScrubberLimits.test_unknown_formats_are_missed` |
@@ -633,7 +633,7 @@ With the package not installed, set `PYTHONPATH=src` first. The tests are split 
 | File | What it covers |
 |---|---|
 | `test_profile.py` | Profile validation and every refusal message |
-| `test_tokeniser.py` | Matching: longest first, whole tokens, case, whitespace, phone numbers |
+| `test_tokenizer.py` | Matching: longest first, whole tokens, case, whitespace, phone numbers |
 | `test_rehydrate.py` | The allow-list, nested data, injected placeholders |
 | `test_roundtrip.py` | Sanitise then rehydrate, including seeded random text and JSON |
 | `test_scrubber_rules.py` | Each scrubber rule: a match, a near miss and its order |
