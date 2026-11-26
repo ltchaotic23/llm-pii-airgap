@@ -117,6 +117,16 @@ class TestEveryRegexIsLinear(TimedTestCase):
                 with self.subTest(rule=placeholder, input=name):
                     self.assert_linear(f"{placeholder} on {name}", _apply_rule, text, placeholder, pattern)
 
+    def test_line_continuations_on_crafted_input(self) -> None:
+        for name, text in {
+            "one long continued value": "password=" + "a\\\n" * 100_000,
+            "many continued assignments": "password=a\\\n" * 60_000,
+            "backslashes without newlines": "password=" + "\\" * 400_000,
+            "continuations then spaces": "password=" + "a\\\n   " * 80_000,
+        }.items():
+            with self.subTest(input=name):
+                self.assert_linear(name, redact_secrets, text)
+
     def test_harness_tag_stripping_on_crafted_input(self) -> None:
         for name, text in CRAFTED_TAGS.items():
             with self.subTest(input=name):

@@ -136,6 +136,22 @@ class TestScrubberEvasion(unittest.TestCase):
                 self.assertNotIn(FAKE_SECRET, redact_secrets(sample)[0])
                 self.assertNotIn("two words", redact_secrets(sample)[0])
 
+    def test_value_continued_with_a_trailing_backslash(self) -> None:
+        tail = j("FAKE", "tail")
+        for sample in (f"SIGNING_KEY={FAKE_SECRET}\\\n{tail}", f"SIGNING_KEY={FAKE_SECRET}\\\r\n{tail}",
+                       f"export DB_PASSWORD={FAKE_SECRET}\\\n    {tail}", f"api_key: {FAKE_SECRET}\\\nmiddle\\\n{tail}",
+                       f"--password {FAKE_SECRET}\\\n  {tail}"):
+            with self.subTest(sample=sample.replace(FAKE_SECRET, "<value>").replace(tail, "<tail>")):
+                out = redact_secrets(sample)[0]
+                self.assertNotIn(FAKE_SECRET, out)
+                self.assertNotIn(tail, out)
+        self.assertEqual(redact_secrets(f"SIGNING_KEY={FAKE_SECRET}\\\n{tail}")[0], "SIGNING_KEY=<SECRET>")
+
+    def test_line_after_a_value_without_a_continuation_is_kept(self) -> None:
+        self.assertEqual(redact_secrets(f"DB_PASSWORD={FAKE_SECRET}\nnext line kept")[0], "DB_PASSWORD=<SECRET>\nnext line kept")
+        self.assertEqual(redact_secrets(f"DB_PASSWORD={FAKE_SECRET}\\\nFAKE\nnext line kept")[0],
+                         "DB_PASSWORD=<SECRET>\nnext line kept")
+
     def test_secret_at_the_end_of_a_very_long_line(self) -> None:
         line = "x" * 1_000_000 + f" DB_PASSWORD={FAKE_SECRET}"
         self.assertNotIn(FAKE_SECRET, redact_secrets(line)[0])

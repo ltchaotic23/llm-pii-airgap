@@ -80,8 +80,10 @@ _SECRET_VALUE = (
     r"|[|>][+-]?\d*[ \t]*[^\r\n]+"
     r"|[=>]+[ \t]*[^\r\n]+"
     # bare word, with an optional auth scheme in front; never an opening { or [, whose
-    # contents are matched on their own ("token": {"access_token": ...})
-    r"|(?![{\[])\S+)"
+    # contents are matched on their own ("token": {"access_token": ...}). A word ending in a
+    # backslash continues on the next line (shell and .env line continuation), so the rest of
+    # a split value is replaced too. Possessive, so the search stays linear.
+    r"|(?![{\[])\S++(?:(?<=\\)\r?\n[ \t]*+\S++)*+)"
 )
 # "- " is a YAML list marker: step over it, and never treat the marker itself as the value.
 _VALUE_GAP = rf"[ \t]*(?:\r?\n[ \t]*(?:-[ \t]+|(?!-[ \t]))(?!{_KEY_LIKE}))?+"

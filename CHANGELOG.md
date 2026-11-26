@@ -52,7 +52,8 @@
   `ApiKey`, …), `os.getenv` / `os.environ.get` defaults, chained assignments, `r"..."` and
   backtick strings with spaces, YAML `''` escapes, multi-line quoted strings, `--flag`
   quoted values, dotted key names, long key suffixes, values starting with `true`/`false`/
-  `null`/`none` plus punctuation, and redacts to end of line when a quote is unclosed.
+  `null`/`none` plus punctuation, unquoted values continued onto the next line with a
+  trailing backslash, and redacts to end of line when a quote is unclosed.
 - `<SECRET>` leaves uppercase `TOKENIZER` / `SECRETARY`, `token_type`, `PASS_RATE`, and
   `token: str = None` alone.
 - Whole-token profile matching treats Unicode combining marks as part of a word so
@@ -65,8 +66,9 @@
 - A profile, input file, `--allow-from` file or transcript saved with a UTF-8 byte order
   mark is read correctly instead of being refused or keeping the mark.
 - A transcript text part whose `text` isn't a string is skipped instead of stopping `scrub`
-  with a traceback, and a line nested too deeply or holding a `>4300`-digit integer counts
-  as `invalid_json`.
+  with a traceback, and a line nested too deeply for Python to read (Python 3.14 reads
+  deeper nesting than earlier versions) or holding a `>4300`-digit integer counts as
+  `invalid_json`.
 - The help text of `--keep-tool-results` says what it does: it keeps the typed text of user
   records that also carry tool results, never the tool output.
 

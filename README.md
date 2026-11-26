@@ -75,7 +75,8 @@ rule's label; for `<SECRET>` the name in front of the value is kept.
 
 `<SECRET>` handles quoted values with spaces (`password = "two words"` becomes
 `password = <SECRET>`), triple-quoted values (also across lines), `r"..."` and backtick
-strings, YAML block scalars (`|`, `>-`), a value on the next line, a YAML list item,
+strings, YAML block scalars (`|`, `>-`), a value on the next line, a value continued onto
+the next line with a trailing backslash (shell and `.env` style), a YAML list item,
 `Authorization:` headers with any scheme word (`Token`, `ApiKey`, …), `os.getenv` /
 `os.environ.get` defaults, chained assignments (`a_password = b_password = ...`), and values
 in escaped JSON; if a quote is unclosed, it redacts to the end of the line.
