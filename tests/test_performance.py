@@ -17,6 +17,8 @@ from llm_pii_airgap.scrubber import _apply_rule
 
 SIZE = 200_000
 LIMIT = 5.0  # seconds; linear code takes a small fraction of this
+MEASURABLE = 0.1  # seconds; shorter timings are too noisy on shared CI machines to compare
+MAX_SCALED_LENGTH = 16 * SIZE  # stop growing a crafted input here
 
 
 def repeat(unit: str, size: int = SIZE) -> str:
@@ -95,8 +97,13 @@ class TimedTestCase(unittest.TestCase):
         self.assertLess(full, 30.0, f"{label} took {full:.1f}s")
         if full < 0.05:
             return
-        half = min(timed(func, *before, text[: len(text) // 2]) for _ in range(2))
-        full = min(full, timed(func, *before, text))
+        # Timings of a few hundredths of a second are mostly noise on shared CI machines, so
+        # grow the input until the half-size run takes long enough to measure, then compare
+        # the best of three runs at each size. The 3x limit itself is unchanged.
+        while timed(func, *before, text[: len(text) // 2]) < MEASURABLE and len(text) < MAX_SCALED_LENGTH:
+            text = text + text
+        half = min(timed(func, *before, text[: len(text) // 2]) for _ in range(3))
+        full = min(timed(func, *before, text) for _ in range(3))
         self.assertLess(full / half, 3.0, f"{label}: {half:.3f}s for half the input, {full:.3f}s for all of it")
 
 

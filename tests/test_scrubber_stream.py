@@ -86,8 +86,16 @@ class TestBadInput(unittest.TestCase):
 
     def test_deeply_nested_line(self) -> None:
         deep = "[" * 100_000 + "]" * 100_000
+        # Python 3.14's json module reads nesting this deep; earlier versions raise
+        # RecursionError. Either way the line is no user prompt, and the next line is scrubbed.
+        try:
+            json.loads(deep)
+            readable = True
+        except RecursionError:
+            readable = False
         rows, summary = scrub_jsonl_stream([deep, user(f"DB_PASSWORD={FAKE_SECRET}")])
-        self.assertEqual(summary["invalid_json"], 1)
+        self.assertEqual(summary["invalid_json"], 0 if readable else 1)
+        self.assertEqual(summary["lines_read"], 2)
         self.assertEqual([row["text"] for row in rows], ["DB_PASSWORD=<SECRET>"])
 
     def test_oversized_integer_line_counts_as_invalid_json(self) -> None:
