@@ -470,8 +470,9 @@ flowchart LR
   name keys, placeholders and files. Argument errors don't repeat what you typed.
 - **Linear time.** Matching, scrubbing and tag stripping are written so that crafted input
   can't make them slow down sharply (catastrophic backtracking); the tests time each rule
-  against worst-case input and check that doubling the input multiplies the time by less
-  than three, once the run is long enough to measure.
+  against worst-case input and check that four times the input takes less than eight times
+  as long (linear code takes four times as long, quadratic code sixteen), once the run is
+  long enough to measure.
 
 ## Threat model
 
