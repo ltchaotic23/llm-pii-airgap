@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Tests
+- The timing tests grow each input past the size where the processor's cache makes the
+  smaller run look faster, so linear code no longer occasionally fails on shared CI machines.
+  The limit (four times the input in under eight times as long) is unchanged, and slow code
+  now fails within seconds.
+
 ## 0.2.0 (26 November 2026)
 
 ### Breaking changes

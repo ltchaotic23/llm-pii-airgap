@@ -18,6 +18,10 @@ from llm_pii_airgap.scrubber import _apply_rule
 SIZE = 200_000
 LIMIT = 5.0  # seconds; linear code takes a small fraction of this
 MEASURABLE = 0.05  # seconds; shorter timings are too noisy on shared CI machines to compare
+# Below roughly this many characters a quarter-size input can still sit in the processor's
+# cache while the full input doesn't, which makes linear code look up to about 7x slower.
+MIN_QUARTER_LENGTH = 400_000
+SLOW_QUARTER = 0.25  # seconds; stop growing here, so slow code fails quickly instead of hanging
 MAX_SCALED_LENGTH = 16 * SIZE  # stop growing a crafted input here
 
 
@@ -93,19 +97,32 @@ class TimedTestCase(unittest.TestCase):
         Linear code gives 4x and quadratic code 16x, so the limit of 8 sits well clear of
         both. Comparing a quarter with the whole, rather than a half, keeps the busy shared
         machines used for CI (where one slow run can stretch 2x to over 3x) from failing
-        linear code, while quadratic code still fails by a wide margin. Machines differ in
+        linear code, while quadratic code still fails by a wide margin. Inputs are grown past
+        the size where the processor's cache flatters the smaller run. Machines differ in
         speed, so only growth is judged, plus a generous absolute ceiling.
         """
         full = timed(func, *before, text)
         self.assertLess(full, 30.0, f"{label} took {full:.1f}s")
         if full < 0.05:
             return
-        # Grow the input until the quarter-size run is long enough to measure, then compare
-        # the best of three runs at each size.
-        while timed(func, *before, text[: len(text) // 4]) < MEASURABLE and len(text) < MAX_SCALED_LENGTH:
+        # Grow the input until the quarter-size run is long enough to time and large enough to
+        # be past the cache effect, then compare the best of three runs at each size. Stop
+        # growing once the quarter is already slow, so quadratic code fails without a long wait.
+        while len(text) < MAX_SCALED_LENGTH:
+            quarter = timed(func, *before, text[: len(text) // 4])
+            if quarter >= SLOW_QUARTER:
+                break
+            if quarter >= MEASURABLE and len(text) // 4 >= MIN_QUARTER_LENGTH:
+                break
             text = text + text
         quarter = min(timed(func, *before, text[: len(text) // 4]) for _ in range(3))
-        full = min(timed(func, *before, text) for _ in range(3))
+        # Best of up to three full runs, stopping at the first that passes: linear code usually
+        # needs one, and only code that really is slow pays for all three.
+        full = float("inf")
+        for _ in range(3):
+            full = min(full, timed(func, *before, text))
+            if full / quarter < 8.0:
+                break
         self.assertLess(full / quarter, 8.0,
                         f"{label}: {quarter:.3f}s for a quarter of the input, {full:.3f}s for all of it")
 

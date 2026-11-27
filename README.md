@@ -472,8 +472,9 @@ flowchart LR
 - **Linear time.** Matching, scrubbing and tag stripping are written so that crafted input
   can't make them slow down sharply (catastrophic backtracking); the tests time each rule
   against worst-case input and check that four times the input takes less than eight times
-  as long (linear code takes four times as long, quadratic code sixteen), once the run is
-  long enough to measure.
+  as long (linear code takes four times as long, quadratic code sixteen), on inputs large
+  enough to time reliably and to be past the point where the processor's cache flatters the
+  smaller run.
 
 ## Threat model
 
